@@ -4,7 +4,6 @@ A static site: no build step and no framework. Open `index.html` in a browser to
 
 ## Files
 - `index.html`, `style.css`, `script.js`: the readable source. Edit these.
-- `dist/`: the same site, minified (about 30 KB of code after gzip). Upload this folder to Netlify, Cloudflare Pages, GitHub Pages or Vercel.
 - `Joshua_Chukwurah_CV.pdf`: the file behind the CV buttons. Replace it to update your CV.
 - `favicon.svg` and `apple-touch-icon.png`: the tab and home screen icons.
 
