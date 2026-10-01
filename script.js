@@ -358,8 +358,19 @@
     if (isAtEdge(direction)) goTo(currentIndex + direction);
   }, { passive: true });
 
-  var touchStartY = 0;
-  addEventListener("touchstart", function (event) { touchStartY = event.touches[0].clientY; }, { passive: true });
+  var touchStartX = 0, touchStartY = 0, isPullGuardActive = false;
+  addEventListener("touchstart", function (event) {
+    touchStartX = event.touches[0].clientX;
+    touchStartY = event.touches[0].clientY;
+    isPullGuardActive = slides[currentIndex].scrollTop <= 0;
+  }, { passive: true });
+  // Pull-to-refresh guard: pulling down at the top of a slide goes to the previous slide and never reloads the page
+  addEventListener("touchmove", function (event) {
+    if (!isPullGuardActive || !event.cancelable || event.touches.length !== 1) return;
+    var pulledDown = event.touches[0].clientY - touchStartY;
+    var movedSideways = Math.abs(event.touches[0].clientX - touchStartX);
+    if (pulledDown > 0 && pulledDown > movedSideways) event.preventDefault();
+  }, { passive: false });
   addEventListener("touchend", function (event) {
     var swipeDistance = touchStartY - event.changedTouches[0].clientY;
     if (Math.abs(swipeDistance) < 60 || Date.now() - lastChangeTime < 1500) return;

@@ -316,3 +316,6 @@ html{-webkit-tap-highlight-color:rgba(196,168,255,.14);accent-color:var(--accent
   .rocket{animation:none;opacity:.5}
   .rocket .rk-signal,.rocket .rk-flame,.rocket .rk-dust circle,.mini-network circle,#menu::after,.site-footer::after,.footer-status i{animation:none}
 }
+
+/* Stops pull-to-refresh and rubber-band bounce, so swiping down always moves to the previous slide */
+html,body{overscroll-behavior:none}
