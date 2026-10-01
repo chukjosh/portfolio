@@ -293,7 +293,7 @@
   var navLinks = document.querySelectorAll("#menu a");
   var dotsContainer = document.getElementById("dots");
   var currentIndex = Math.max(0, slideIds.indexOf(location.hash.slice(1)));
-  var isTransitioning = false, lastChangeTime = 0;
+  var isTransitioning = false, queuedSteps = 0, pendingTarget = null;
   var scenePoseListener = function () {};
 
   var dotButtons = slides.map(function (slide, index) {
@@ -316,14 +316,30 @@
   function revealItems(slide, animated) {
     if (!hasGsap) return;
     gsap.fromTo(slide.querySelectorAll(".rv"),
-      { autoAlpha: 0, y: 20 },
-      { autoAlpha: 1, y: 0, duration: animated ? 0.9 : 0, stagger: animated ? 0.07 : 0, delay: animated ? 0.5 : 0, ease: "power2.out", clearProps: "all" });
+      { autoAlpha: 0, y: 18 },
+      { autoAlpha: 1, y: 0, duration: animated ? 0.55 : 0, stagger: animated ? 0.045 : 0, delay: animated ? 0.28 : 0, ease: "power2.out", clearProps: "all" });
   }
 
+  // Slides travel straight up or down together. Input during a move is queued, so scrolling never feels blocked.
+  var TRANSITION_SECONDS = 0.7;
+  function finishTransition() {
+    isTransitioning = false;
+    if (pendingTarget !== null) {
+      var target = pendingTarget;
+      pendingTarget = null;
+      queuedSteps = 0;
+      goTo(target);
+    } else if (queuedSteps !== 0) {
+      var step = queuedSteps > 0 ? 1 : -1;
+      queuedSteps -= step;
+      goTo(currentIndex + step);
+    }
+  }
   function goTo(nextIndex) {
-    if (isTransitioning || nextIndex < 0 || nextIndex >= slides.length || nextIndex === currentIndex) return;
+    if (nextIndex < 0 || nextIndex >= slides.length) return;
+    if (isTransitioning) { pendingTarget = nextIndex; return; }
+    if (nextIndex === currentIndex) return;
     isTransitioning = true;
-    lastChangeTime = Date.now();
     var direction = nextIndex > currentIndex ? 1 : -1;
     var outgoing = slides[currentIndex], incoming = slides[nextIndex];
     outgoing.classList.add("is-leaving");
@@ -336,15 +352,19 @@
       outgoing.style.visibility = "hidden"; outgoing.style.opacity = 0;
       incoming.style.visibility = "visible"; incoming.style.opacity = 1;
       outgoing.classList.remove("is-leaving");
-      isTransitioning = false;
+      finishTransition();
       return;
     }
-    var duration = prefersReducedMotion ? 0 : 1.2;
-    gsap.set(incoming, { yPercent: 8 * direction, scale: 1.02 });
-    gsap.timeline({ onComplete: function () { gsap.set(outgoing, { autoAlpha: 0 }); outgoing.classList.remove("is-leaving"); isTransitioning = false; } })
-      .to(outgoing, { autoAlpha: 0, yPercent: -8 * direction, duration: duration, ease: "power3.inOut" }, 0)
-      .to(incoming, { autoAlpha: 1, yPercent: 0, scale: 1, duration: duration, ease: "power3.inOut" }, 0);
+    var duration = prefersReducedMotion ? 0 : TRANSITION_SECONDS;
+    gsap.set(incoming, { autoAlpha: 1, yPercent: 100 * direction });
+    gsap.timeline({ onComplete: function () { gsap.set(outgoing, { autoAlpha: 0, yPercent: 0 }); outgoing.classList.remove("is-leaving"); finishTransition(); } })
+      .to(outgoing, { yPercent: -100 * direction, duration: duration, ease: "power2.inOut" }, 0)
+      .to(incoming, { yPercent: 0, duration: duration, ease: "power2.inOut" }, 0);
     revealItems(incoming, duration > 0);
+  }
+  function requestStep(direction) {
+    if (isTransitioning) { queuedSteps = Math.max(-2, Math.min(2, queuedSteps + direction)); return; }
+    goTo(currentIndex + direction);
   }
 
   // A slide taller than the screen scrolls first, then hands over to the next slide at its edge
@@ -352,16 +372,27 @@
     var slide = slides[currentIndex];
     return direction > 0 ? slide.scrollTop + slide.clientHeight >= slide.scrollHeight - 2 : slide.scrollTop <= 0;
   }
+
+  // One scroll gesture moves one slide. The fading tail of a trackpad swipe is ignored, a new push goes through straight away.
+  var lastWheelTime = 0, lastWheelMagnitude = 0;
   addEventListener("wheel", function (event) {
-    if (Math.abs(event.deltaY) < 20 || Math.abs(event.deltaX) > Math.abs(event.deltaY) || Date.now() - lastChangeTime < 1500) return;
+    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    var magnitude = Math.abs(event.deltaY);
+    if (magnitude < 6) return;
+    var now = performance.now();
+    var isFreshInput = now - lastWheelTime > 100 || magnitude > Math.max(30, lastWheelMagnitude * 1.4);
+    lastWheelTime = now;
+    lastWheelMagnitude = magnitude;
+    if (!isFreshInput) return;
     var direction = event.deltaY > 0 ? 1 : -1;
-    if (isAtEdge(direction)) goTo(currentIndex + direction);
+    if (isAtEdge(direction)) requestStep(direction);
   }, { passive: true });
 
-  var touchStartX = 0, touchStartY = 0, isPullGuardActive = false;
+  var touchStartX = 0, touchStartY = 0, touchStartTime = 0, isPullGuardActive = false;
   addEventListener("touchstart", function (event) {
     touchStartX = event.touches[0].clientX;
     touchStartY = event.touches[0].clientY;
+    touchStartTime = performance.now();
     isPullGuardActive = slides[currentIndex].scrollTop <= 0;
   }, { passive: true });
   // Pull-to-refresh guard: pulling down at the top of a slide goes to the previous slide and never reloads the page
@@ -373,9 +404,10 @@
   }, { passive: false });
   addEventListener("touchend", function (event) {
     var swipeDistance = touchStartY - event.changedTouches[0].clientY;
-    if (Math.abs(swipeDistance) < 60 || Date.now() - lastChangeTime < 1500) return;
+    var isQuickFlick = performance.now() - touchStartTime < 250;
+    if (Math.abs(swipeDistance) < (isQuickFlick ? 36 : 60)) return;
     var direction = swipeDistance > 0 ? 1 : -1;
-    if (isAtEdge(direction)) goTo(currentIndex + direction);
+    if (isAtEdge(direction)) requestStep(direction);
   }, { passive: true });
 
   var directionByKey = { ArrowDown: 1, PageDown: 1, " ": 1, ArrowUp: -1, PageUp: -1 };
@@ -390,7 +422,7 @@
     if (!direction) return;
     if (event.key === " " && /^(BUTTON|A)$/.test(event.target.tagName)) return;
     event.preventDefault();
-    if (isAtEdge(direction)) goTo(currentIndex + direction);
+    if (isAtEdge(direction)) requestStep(direction);
     else slides[currentIndex].scrollBy({ top: direction * innerHeight * 0.6, behavior: prefersReducedMotion ? "auto" : "smooth" });
   });
 
